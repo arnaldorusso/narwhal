@@ -24,8 +24,8 @@ before_install:
 
 install:
   - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib
-  - python -c "import numpy; numpy.get_include()"
-  - python -c "import numpy; numpy.get_include()" | xargs ls
+  - python -c "import numpy; print(numpy.get_include())"
+  - python -c "import numpy; print(numpy.get_include())" | xargs ls
   - pip install karta
   - pip install requests
     #- pip install -r requirements.txt
