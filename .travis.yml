@@ -16,19 +16,18 @@ before_install:
   - ./miniconda.sh -b -p miniconda
   - export PATH=miniconda/bin:$PATH
   - conda update --yes conda
+  - git clone git://github.com/njwilson23/karta.git
   # The next couple lines fix a crash with multiprocessing on Travis and are
   # not specific to using Miniconda
   - sudo rm -rf /dev/shm
   - sudo ln -s /run/shm /dev/shm
-  - git clone git://github.com/njwilson23/karta.git
 
 install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib
-  - pip install karta/
-  - python -c "from karta import Point"
-  - pip install requests
+  - "conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib"
+  - "pip install karta/"
+  - "pip install requests"
     #- pip install -r requirements.txt
-  - pip install .
+  - "pip install ."
 
 script:
   python tests.py
