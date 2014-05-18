@@ -15,12 +15,12 @@ before_install:
   - chmod +x miniconda.sh
   - ./miniconda.sh -b -p miniconda
   - export PATH=/home/travis/miniconda/bin:$PATH
-  #- conda update --yes conda
+  - conda update --yes conda
   # The next couple lines fix a crash with multiprocessing on Travis and are
   # not specific to using Miniconda
   - sudo rm -rf /dev/shm
   - sudo ln -s /run/shm /dev/shm
-  - git checkout git@github.com:njwilson23/karta.git
+  - git clone git@github.com:njwilson23/karta.git
 
 install:
   - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib
