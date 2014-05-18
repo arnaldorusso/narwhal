@@ -25,6 +25,7 @@ before_install:
 install:
   - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib
   - pip install karta/
+  - pip install -r requirements
   - pip install .
 
 script:
