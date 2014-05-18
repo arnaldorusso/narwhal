@@ -16,7 +16,7 @@ before_install:
   #- ./miniconda.sh -b -p miniconda
   #- export PATH=miniconda/bin:$PATH
   #- conda update --yes conda
-  - sudo apt-get install python-numpy python-scipy python-matplotlib
+  - sudo apt-get install python-numpy python-scipy python-matplotlib python-pyproj
   - git clone git://github.com/njwilson23/karta.git
   # The next couple lines fix a crash with multiprocessing on Travis and are
   # not specific to using Miniconda
