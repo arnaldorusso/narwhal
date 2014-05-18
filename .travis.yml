@@ -20,11 +20,12 @@ before_install:
   # not specific to using Miniconda
   - sudo rm -rf /dev/shm
   - sudo ln -s /run/shm /dev/shm
-  - git clone git://github.com/njwilson23/karta.git
+  - git clone git://github.com/njwilson23/karta.git karta_package
 
 install:
   - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib
-  - pip install karta/
+  - pip install karta_package/
+  - python -c "from karta import Point"
   - pip install requests
     #- pip install -r requirements.txt
   - pip install .
