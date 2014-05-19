@@ -11,13 +11,13 @@ branches:
 
 before_install:
   - sudo apt-get install python-numpy python-scipy python-matplotlib python-pyproj
-  - echo `find . -name *cgsw*`
 
 install:
   - pip install karta
   - pip install requests
     #- pip install -r requirements.txt
   - pip install .
+  - echo `find . -name *cgsw*`
 
 script:
   python tests.py
