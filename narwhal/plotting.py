@@ -3,10 +3,10 @@ import operator
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import griddata
-import gsw
 from karta import Point, Line, LONLAT
 from narwhal.cast import Cast, CastCollection
-import narwhal.util as util
+from . import util
+from . import gsw
 
 ccmeanp = util.ccmeanp
 ccmeans = util.ccmeans
@@ -55,7 +55,8 @@ def plot_ts(*casts, **kwargs):
     if len(casts) > 1 and drawlegend:
         ax.legend(loc="best", frameon=False)
 
-    add_sigma_contours(contourint, ax)
+    if contourint is not None:
+        add_sigma_contours(contourint, ax)
     ax.set_xlabel("Salinity")
     ax.set_ylabel(u"Potential temperature (\u00b0C)")
     return
@@ -66,8 +67,8 @@ def add_sigma_contours(contourint, ax=None):
     tl = ax.get_ylim()
     SA = np.linspace(sl[0], sl[1])
     CT = np.linspace(tl[0], tl[1])
-    SIGMA = np.reshape([gsw.gsw_rho(sa, ct, 0)-1000 for ct in CT
-                                                    for sa in SA],
+    SIGMA = np.reshape([gsw.rho(sa, ct, 0)-1000 for ct in CT
+                                                for sa in SA],
                     (50, 50))
     cc = ax.contour(SA, CT, SIGMA, np.arange(np.floor(SIGMA.min()),
                                              np.ceil(SIGMA.max()), contourint),
@@ -111,12 +112,14 @@ def add_runoff_line(origin, ax=None, **kw):
     ax.set_ylim(yl)
     return
 
-def add_freezing_line(ax=None, p=0.0, air_sat_fraction=0.1):
+def add_freezing_line(ax=None, p=0.0, air_sat_fraction=0.1, **kw):
     ax = ax if ax is not None else plt.gca()
+    kw.setdefault("linestyle", "--")
+    kw.setdefault("color", "k")
     SA = np.linspace(*ax.get_xlim())
-    ctfreeze = lambda sa: gsw.gsw_ct_freezing(sa, p, air_sat_fraction)
-    ptfreeze = np.array([gsw.gsw_pt_from_ct(sa, ctfreeze(sa)) for sa in SA])
-    ax.plot(SA, ptfreeze, "-.", color="k", label="Freezing line ({0} dbar)".format(p))
+    ctfreeze = lambda sa: gsw.ct_freezing(sa, p, air_sat_fraction)
+    ptfreeze = np.array([gsw.pt_from_ct(sa, ctfreeze(sa)) for sa in SA])
+    ax.plot(SA, ptfreeze, label="Freezing line ({0} dbar)".format(p), **kw)
     return
 
 ###### Section plots #######
@@ -126,7 +129,10 @@ DEFAULT_CONTOUR = {"colors":    "black"}
 DEFAULT_CONTOURF = {"cmap":     plt.cm.gist_ncar,
                     "extend":   "both"}
 
-def plot_section_properties(cc, ax=None, prop="sigma", cntrrc=None, cntrfrc=None):
+def plot_section_properties(cc, ax=None, prop="temp",
+                            cntrrc=None,
+                            cntrfrc=None,
+                            interp_method="linear"):
     """ Add water properties from a CastCollection to a section plot.
     
     Keyword arguments:
@@ -135,6 +141,7 @@ def plot_section_properties(cc, ax=None, prop="sigma", cntrrc=None, cntrfrc=None
     prop                Cast property to show
     cntrrc              dictionary of pyplot.contour keyword arguments
     cntrfrc             dictionary of pyplot.contourf keyword argument
+    interp_method       method used by scipy.griddata
     """
     if ax is None:
         ax = plt.gca()
@@ -157,7 +164,7 @@ def plot_section_properties(cc, ax=None, prop="sigma", cntrrc=None, cntrfrc=None
     data_interp = griddata(np.c_[obsx.flatten(), obspres.flatten()],
                            rawdata.flatten(),
                            np.c_[intx.flatten(), intpres.flatten()],
-                           method="linear")
+                           method=interp_method)
 
     ax.contourf(intx, intpres, data_interp.reshape(intx.shape), **cntrfrc)
     cl = ax.contour(intx, intpres, data_interp.reshape(intx.shape), **cntrrc)
@@ -165,7 +172,7 @@ def plot_section_properties(cc, ax=None, prop="sigma", cntrrc=None, cntrfrc=None
 
     # Set plot bounds
     presgen = (np.array(c["pres"]) for c in cc)
-    validgen = (~np.isnan(c["sigma"]) for c in cc)
+    validgen = (~np.isnan(c[prop]) for c in cc)
     ymax = max(p[msk][-1] for p,msk in zip(presgen, validgen))
     for x_ in cx:
         ax.plot((x_, x_), (ymax, 0), "--k")
