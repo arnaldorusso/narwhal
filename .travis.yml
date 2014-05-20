@@ -11,6 +11,7 @@ branches:
 
 before_install:
   - sudo apt-get install python-numpy python-scipy python-matplotlib python-pyproj
+  - python -c "import pyproj"
 
 install:
   - pip install karta
