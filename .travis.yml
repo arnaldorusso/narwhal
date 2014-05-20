@@ -16,7 +16,7 @@ install:
   - pip install karta
   - pip install requests
     #- pip install -r requirements.txt
-  - pip install .
+  - pip install . -v
   - echo `find . -name *cgsw*`
 
 script:
