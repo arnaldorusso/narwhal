@@ -17,7 +17,7 @@ install:
   - pip install requests
     #- pip install -r requirements.txt
   - python install_gsw.py   # needed to put the extension module in place for tests
-  - echo `find . -name *cgsw*
+  - echo `find . -name *cgsw*`
   - pip install . -v
 
 script:
