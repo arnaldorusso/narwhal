@@ -5,14 +5,9 @@ from os import listdir
 from os.path import dirname, realpath, splitext, join
 
 install_dir = dirname(realpath(__file__))
-print __file__
-print install_dir
 
 def find_gsw(s):
     return splitext(s)[1] == ".so" and s.startswith("cgsw")
-
-print listdir(install_dir)
-print filter(find_gsw, listdir(install_dir))
 
 name = list(filter(find_gsw, listdir(install_dir)))[0]
 cgsw = ctypes.cdll.LoadLibrary(join(install_dir, name))
