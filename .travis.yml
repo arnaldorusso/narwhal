@@ -10,14 +10,14 @@ branches:
     - travis
 
 before_install:
-  - sudo apt-get install python-numpy python-scipy python-matplotlib python-pyproj
+  - sudo apt-get install python-numpy
   - python -c "import pyproj"
 
 install:
   - pip install karta
   - pip install requests
+  - pip install pyproj
     #- pip install -r requirements.txt
-  - echo `find . -name *cgsw*`
   - pip install . -v
 
 script:
