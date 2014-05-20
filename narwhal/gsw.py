@@ -5,6 +5,7 @@ from os import listdir
 from os.path import dirname, realpath, splitext, join
 
 install_dir = dirname(realpath(__file__))
+print listdir("/home/travis/virtualenv/python2.7.6/lib/python2.7/site-packages/narwhal")
 
 def find_gsw(s):
     return splitext(s)[1] == ".so" and s.startswith("cgsw")
