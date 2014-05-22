@@ -1,8 +1,10 @@
-
 import unittest
+import os
 import numpy as np
-from narwhal.cast import Cast, CastCollection
-from narwhal.cast import force_monotonic
+import narwhal
+from narwhal.cast import Cast, CTDCast, XBTCast, LADCP
+from narwhal.cast import CastCollection
+from narwhal.cast import force_monotonic, diff2, uintegrate
 from narwhal.bathymetry import Bathymetry
 
 class CastTests(unittest.TestCase):
@@ -57,14 +59,14 @@ class CastTests(unittest.TestCase):
         #                 2.7674560521632685)
         return
 
-    def test_projectother(self):
-        pass
+    #def test_projectother(self):
+    #    pass
 
-    def test_calculate_sigma(self):
-        pass
+    #def test_calculate_sigma(self):
+    #    pass
 
-    def test_calculate_theta(self):
-        pass
+    #def test_calculate_theta(self):
+    #    pass
 
 class CastCollectionTests(unittest.TestCase):
 
@@ -122,7 +124,50 @@ class BathymetryTests(unittest.TestCase):
                      coords=(-17.45, 80.16)))
         cc.add_bathymetry(self.bathymetry)
         correctresult = np.array([91.87894384, 122.9704543, 154.58219622])
-        self.assertTrue(np.allclose(cc["botdepth"], correctresult))
+        depths = [c.properties["depth"] for c in cc]
+        self.assertTrue(np.allclose(depths, correctresult))
+        return
+
+class IOTests(unittest.TestCase):
+
+    def setUp(self):
+        p = np.arange(1, 1001, 2)
+        temp = 10. * np.exp(-.008*p) - 15. * np.exp(-0.005*(p+100)) + 2.
+        sal = -14. * np.exp(-.01*p) + 34.
+        self.p = p
+        self.temp = temp
+        self.sal = sal
+        self.cast = Cast(self.p, temp=self.temp, sal=self.sal)
+        self.ctd = CTDCast(self.p, temp=self.temp, sal=self.sal)
+        self.xbt = XBTCast(self.p, temp=self.temp, sal=self.sal)
+        return
+
+    def test_save(self):
+        directory = os.path.dirname(__file__)
+        datadir = os.path.join(directory, "data")
+        if not os.path.exists(datadir):
+                os.mkdir(datadir)
+
+        fnm = os.path.join(datadir, "cast_test.nwl")
+        self.cast.save(fnm)
+
+        fnm = os.path.join(datadir, "ctd_test.nwl")
+        self.ctd.save(fnm)
+
+        fnm = os.path.join(datadir, "xbt_test.nwl")
+        self.xbt.save(fnm)
+        return
+
+    def test_load(self):
+        directory = os.path.dirname(__file__)
+        datadir = os.path.join(directory, "data")
+
+        cast = narwhal.read(os.path.join(datadir, "reference_cast_test.nwl"))
+        ctd = narwhal.read(os.path.join(datadir, "reference_ctd_test.nwl"))
+        xbt = narwhal.read(os.path.join(datadir, "reference_xbt_test.nwl"))
+        self.assertEqual(cast, self.cast)
+        self.assertEqual(ctd, self.ctd)
+        self.assertEqual(xbt, self.xbt)
         return
 
 class MiscTests(unittest.TestCase):
@@ -136,6 +181,30 @@ class MiscTests(unittest.TestCase):
         sm = force_monotonic(s)
         self.assertTrue(np.all(sm == np.array([1, 3, 5, 5+1e-16, 7,
                                                9, 13, 13+1e-16, 15])))
+        return
+
+    def test_diff2(self):
+        x = np.atleast_2d(np.linspace(-1, 1, 100))
+        A = x**2 - (x + x.T)**3
+        ans = 2*x - 3*(x + x.T)**2      # true answer
+
+        # add holes
+        A[30:40,1] = np.nan
+        A[15,35] = np.nan
+        A[30:50,50:55] = np.nan
+        A[60:65,60] = np.nan
+        A[60:70,-2] = np.nan
+
+        D = diff2(A, x.ravel())
+        self.assertTrue(np.max(abs(ans[~np.isnan(D)] - D[~np.isnan(D)])) < 0.15)
+
+    def test_uintegrate(self):
+        x = np.atleast_2d(np.linspace(-1, 1, 100))
+        ans = x**2 - (x + x.T)**3
+        D = - 3*(x + x.T)**2
+
+        I = uintegrate(D, np.tile(x.T, (1, x.size)), ubase=ans[-1])
+        self.assertTrue(np.max(abs(ans - I)) < 0.0005)
         return
 
 if __name__ == "__main__":

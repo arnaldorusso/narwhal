@@ -1,7 +1,7 @@
 import itertools
 import operator
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 from karta import Point, Line, LONLAT
 from narwhal.cast import Cast, CastCollection
@@ -44,7 +44,7 @@ def plot_ts(*casts, **kwargs):
     plotkw.setdefault("ms", 6)
 
     for i, cast in enumerate(casts):
-        sty = styles.next()
+        sty = next(styles)
         if isinstance(cast, CastCollection):
             for subcast in cast:
                 ax.plot(subcast[skey], subcast[tkey], sty, **plotkw)
@@ -132,7 +132,10 @@ DEFAULT_CONTOURF = {"cmap":     plt.cm.gist_ncar,
 def plot_section_properties(cc, ax=None, prop="temp",
                             cntrrc=None,
                             cntrfrc=None,
-                            interp_method="linear"):
+                            interp_method="linear",
+                            ninterp=30,
+                            mask=True,
+                            **kw):
     """ Add water properties from a CastCollection to a section plot.
     
     Keyword arguments:
@@ -142,6 +145,9 @@ def plot_section_properties(cc, ax=None, prop="temp",
     cntrrc              dictionary of pyplot.contour keyword arguments
     cntrfrc             dictionary of pyplot.contourf keyword argument
     interp_method       method used by scipy.griddata
+    mask                apply a NaN mask to the bottom of the section plot
+
+    Additional keyword arguments are passed to *both* controur and contourf.
     """
     if ax is None:
         ax = plt.gca()
@@ -153,21 +159,49 @@ def plot_section_properties(cc, ax=None, prop="temp",
     ccline = Line([c.coords for c in cc], crs=LONLAT)
     cx = np.array(ccline.cumlength())
     y = cc[0]["pres"]
-
-    # interpolate over NaNs
-    rawdata = cc.asarray(prop)
     obsx, obspres = np.meshgrid(cx, y)
-    obspres = obspres[~np.isnan(rawdata)]
-    obsx = obsx[~np.isnan(rawdata)]
-    rawdata = rawdata[~np.isnan(rawdata)]
-    intpres, intx = np.meshgrid(y, np.linspace(cx[0], cx[-1], 30))
-    data_interp = griddata(np.c_[obsx.flatten(), obspres.flatten()],
+    intpres, intx = np.meshgrid(y, np.linspace(cx[0], cx[-1], ninterp))
+    rawdata = cc.asarray(prop)
+
+    # interpolate over NaNs in a way that assumes horizontal correlation
+    for (i, row) in enumerate(rawdata):
+        if np.any(np.isnan(row)):
+            if np.any(~np.isnan(row)):
+                # find groups of NaNs
+                start = -1
+                for (idx, val) in enumerate(row):
+                    if start == -1 and np.isnan(val):
+                        start = idx
+                    elif start != -1 and not np.isnan(val):
+                        if start == 0:
+                            meanval = val
+                        else:
+                            meanval = 0.5 * (val + row[start-1])
+                        row[start:idx] = meanval
+                        start = -1
+                if start != -1:
+                    rawdata[i,start:] = row[start-1]
+            else:
+                if i != 0:
+                    row = rawdata[i-1]
+
+    intdata = griddata(np.c_[obsx.flatten(), obspres.flatten()],
                            rawdata.flatten(),
                            np.c_[intx.flatten(), intpres.flatten()],
                            method=interp_method)
+    intdata = intdata.reshape(intx.shape)
 
-    ax.contourf(intx, intpres, data_interp.reshape(intx.shape), **cntrfrc)
-    cl = ax.contour(intx, intpres, data_interp.reshape(intx.shape), **cntrrc)
+    if mask:
+        botdepth = [cast["botdepth"] for cast in cc]
+        zmask1 = np.interp(intx[:,0], cx, botdepth)
+        zmask = intpres.T > np.tile(zmask1, (intx.shape[1], 1))
+        zmask = zmask.T
+        intdata[zmask] = np.nan
+
+    cntrfrc.update(kw)
+    cntrrc.update(kw)
+    cm = ax.contourf(intx, intpres, intdata, **cntrfrc)
+    cl = ax.contour(intx, intpres, intdata, **cntrrc)
     ax.clabel(cl, fmt="%.1f")
 
     # Set plot bounds
@@ -178,7 +212,7 @@ def plot_section_properties(cc, ax=None, prop="temp",
         ax.plot((x_, x_), (ymax, 0), "--k")
     ax.set_ylim((ymax, 0))
     ax.set_xlim((cx[0], cx[-1]))
-    return
+    return cm
 
 def plot_section_bathymetry(bathymetry, vertices=None, ax=None, maxdistance=0.01):
     """ Add bathymetry from a Bathymetry object to a section plot.

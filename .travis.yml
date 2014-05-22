@@ -9,16 +9,17 @@ branches:
     - master
     - travis
 
-before_install:
-  - sudo apt-get install python-numpy
+virtualenv:
+  system_site_packages: true
 
 install:
-  - pip install karta
-  - pip install requests
-  - pip install pyproj
-  - python -c "import pyproj"
     #- pip install -r requirements.txt
-  - pip install . -v
+  - sudo apt-get update
+  - sudo apt-get install python-numpy python-scipy python-pyproj
+  - pip install karta
+  - pip install pyshp
+  - pip install requests
+  - pip install .
 
 script:
   python tests/runtests.py

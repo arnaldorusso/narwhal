@@ -173,7 +173,7 @@ def cname(line):
 def getfuncpointer(name):
     return cgsw.__getattr__(name)
 
-def addargtypes(func, line):
+def argtypes(line):
     args = line.rsplit("(", 1)[1].split(")", 1)[0].split(",")
     cargs = []
     for arg in args:
@@ -182,16 +182,19 @@ def addargtypes(func, line):
             cargs.append(ctypes.c_double)
         elif typ == "int":
             cargs.append(ctypes.c_int)
-    name = cname(line)
-    func.argtypes = tuple(cargs)
-    return
+    return tuple(cargs)
 
-def addrestype(func, line):
+def argnames(line):
+    args = line.rsplit("(", 1)[1].split(")", 1)[0].split(",")
+    names = []
+    for arg in args:
+        names.append(arg.split()[1].strip())
+    return tuple(names)
+
+def restype(line):
     s = line.split(" ", 2)[1:2][0].strip()
     if s == "double":
-        name = cname(line)
-        func.restype = ctypes.c_double
-    return
+        return ctypes.c_double
 
 def addname(line):
     name = line.split(" ", 2)[2].split("(", 1)[0]
@@ -203,7 +206,8 @@ for line in lines:
     name = cname(line)
     if name in importnames:
         func = getfuncpointer(name)
-        addargtypes(func, line)
-        addrestype(func, line)
+        func.argtypes = argtypes(line)
+        func.restype = restype(line)
+        func.__doc__ = name + str(argnames(line))
         addname(line)
 
