@@ -24,10 +24,9 @@ before_install:
   - python -c "import sys; print(sys.path)"
 
 install:
-  - conda create -n test-environment python=$TRAVIS_PYTHON_VERSION dep1 dep2 ...
-  - source activate test-environment
   - sudo apt-get install python-numpy   # needed to get numpy C-headers, which aren't being shown for the travis install
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION numpy scipy pip
+  - conda create -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy pip
+  - source activate test-environment
   - pip install karta pyshp pyproj requests
   - pip install . -v
   - python -c "import narwhal"
