@@ -9,31 +9,26 @@ branches:
     - master
     - travis
 
-virtualenv:
-  system_site_packages: true
+#virtualenv:
+#  system_site_packages: true
 
 before_install:
+  - sudo apt-get update
   - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
   - ./miniconda.sh -b
   - python -c "import sys; print(sys.path)"
   - export PATH=/home/travis/miniconda/bin:$PATH
-  - OLDPATH=$PATH
   - conda update --yes conda
-  - python -c "import sys; print(sys.path)"
-  - export PATH=$PATH:$OLDPATH
+  - conda info -a
   - python -c "import sys; print(sys.path)"
 
 install:
-    #- pip install -r requirements.txt
-  - sudo apt-get update
+  - conda create -n test-environment python=$TRAVIS_PYTHON_VERSION dep1 dep2 ...
+  - source activate test-environment
   - sudo apt-get install python-numpy   # needed to get numpy C-headers, which aren't being shown for the travis install
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION numpy scipy
-  - pip install karta
-  - pip install pyshp
-  - pip install pyproj
-  - pip install requests
-  - pip install dateutil
+  - conda install --yes python=$TRAVIS_PYTHON_VERSION numpy scipy pip
+  - pip install karta pyshp pyproj requests dateutil
   - pip install . -v
   - python -c "import narwhal"
 
