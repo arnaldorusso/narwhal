@@ -9,6 +9,10 @@ install_dir = dirname(realpath(__file__))
 def find_gsw(s):
     return splitext(s)[1] == ".so" and s.startswith("cgsw")
 
+print(install_dir)
+print(listdir(install_dir))
+print(list(filter(find_gsw, listdir(install_dir))))
+
 name = list(filter(find_gsw, listdir(install_dir)))[0]
 cgsw = ctypes.cdll.LoadLibrary(join(install_dir, name))
 
