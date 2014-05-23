@@ -1,5 +1,6 @@
 import itertools
 import operator
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
@@ -129,12 +130,13 @@ DEFAULT_CONTOUR = {"colors":    "black"}
 DEFAULT_CONTOURF = {"cmap":     plt.cm.gist_ncar,
                     "extend":   "both"}
 
-def plot_section_properties(cc, ax=None, prop="temp",
+def plot_section_properties(cc, prop="temp", ax=None,
                             cntrrc=None,
                             cntrfrc=None,
                             interp_method="linear",
                             ninterp=30,
                             mask=True,
+                            bottomkey="depth",
                             **kw):
     """ Add water properties from a CastCollection to a section plot.
     
@@ -146,6 +148,7 @@ def plot_section_properties(cc, ax=None, prop="temp",
     cntrfrc             dictionary of pyplot.contourf keyword argument
     interp_method       method used by scipy.griddata
     mask                apply a NaN mask to the bottom of the section plot
+    bottomkey           key in properties giving bottom depth
 
     Additional keyword arguments are passed to *both* controur and contourf.
     """
@@ -158,7 +161,7 @@ def plot_section_properties(cc, ax=None, prop="temp",
 
     ccline = Line([c.coords for c in cc], crs=LONLAT)
     cx = np.array(ccline.cumlength())
-    y = cc[0]["pres"]
+    y = cc[0][cc[0].primarykey]
     obsx, obspres = np.meshgrid(cx, y)
     intpres, intx = np.meshgrid(y, np.linspace(cx[0], cx[-1], ninterp))
     rawdata = cc.asarray(prop)
@@ -192,24 +195,28 @@ def plot_section_properties(cc, ax=None, prop="temp",
     intdata = intdata.reshape(intx.shape)
 
     if mask:
-        botdepth = [cast["botdepth"] for cast in cc]
-        zmask1 = np.interp(intx[:,0], cx, botdepth)
+        depth = [cast.properties[bottomkey] for cast in cc]
+        zmask1 = np.interp(intx[:,0], cx, depth)
         zmask = intpres.T > np.tile(zmask1, (intx.shape[1], 1))
         zmask = zmask.T
         intdata[zmask] = np.nan
 
-    cntrfrc.update(kw)
-    cntrrc.update(kw)
+    if len(kw) != 0:
+        cntrrc = copy.copy(cntrrc)
+        cntrfrc = copy.copy(cntrfrc)
+        cntrrc.update(kw)
+        cntrfrc.update(kw)
+
     cm = ax.contourf(intx, intpres, intdata, **cntrfrc)
     cl = ax.contour(intx, intpres, intdata, **cntrrc)
-    ax.clabel(cl, fmt="%.1f")
+    ax.clabel(cl, fmt="%.2f")
 
     # Set plot bounds
-    presgen = (np.array(c["pres"]) for c in cc)
+    presgen = (np.array(c[c.primarykey]) for c in cc)
     validgen = (~np.isnan(c[prop]) for c in cc)
     ymax = max(p[msk][-1] for p,msk in zip(presgen, validgen))
     for x_ in cx:
-        ax.plot((x_, x_), (ymax, 0), "--k")
+        ax.plot((x_, x_), (ymax, 0), "--", color="0.3")
     ax.set_ylim((ymax, 0))
     ax.set_xlim((cx[0], cx[-1]))
     return cm

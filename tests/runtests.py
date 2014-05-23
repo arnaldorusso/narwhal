@@ -1,11 +1,18 @@
 import unittest
 import os
+import datetime
 import numpy as np
 import narwhal
+from narwhal import gsw
 from narwhal.cast import Cast, CTDCast, XBTCast, LADCP
 from narwhal.cast import CastCollection
 from narwhal.cast import force_monotonic, diff2, uintegrate
 from narwhal.bathymetry import Bathymetry
+
+directory = os.path.dirname(__file__)
+DATADIR = os.path.join(directory, "data")
+if not os.path.exists(DATADIR):
+    os.mkdir(DATADIR)
 
 class CastTests(unittest.TestCase):
 
@@ -57,6 +64,17 @@ class CastTests(unittest.TestCase):
                          0.77935861)
         #self.assertEqual(np.round(self.cast1.interpolate("pres", "temp", 1.5), 8),
         #                 2.7674560521632685)
+        return
+
+    def test_add_density(self):
+        p = np.arange(10)
+        t = 20.0 * 0.2 * p
+        s = 30.0 * 0.25 * p
+        cast = CTDCast(p, s, t)
+        ct = np.array([gsw.ct_from_t(s_, t_, p_) for (s_,t_,p_) in zip(s, t, p)])
+        rho = np.array([gsw.rho(s_, ct_, p_) for (s_,ct_,p_) in zip(s, ct, p)])
+        cast.add_density()
+        self.assertTrue(np.allclose(rho, cast["rho"]))
         return
 
     #def test_projectother(self):
@@ -137,38 +155,57 @@ class IOTests(unittest.TestCase):
         self.p = p
         self.temp = temp
         self.sal = sal
-        self.cast = Cast(self.p, temp=self.temp, sal=self.sal)
-        self.ctd = CTDCast(self.p, temp=self.temp, sal=self.sal)
-        self.xbt = XBTCast(self.p, temp=self.temp, sal=self.sal)
+        dt = datetime.datetime(1993, 8, 18, 14, 42, 36)
+        self.cast = Cast(self.p, temp=self.temp, sal=self.sal,
+                        properties={"date":dt})
+        self.ctd = CTDCast(self.p, temp=self.temp, sal=self.sal,
+                        properties={"date":dt})
+        self.xbt = XBTCast(self.p, temp=self.temp, sal=self.sal,
+                        properties={"date":dt})
+        self.collection = CastCollection(self.ctd, self.xbt, self.ctd)
         return
 
     def test_save(self):
-        directory = os.path.dirname(__file__)
-        datadir = os.path.join(directory, "data")
-        if not os.path.exists(datadir):
-                os.mkdir(datadir)
-
-        fnm = os.path.join(datadir, "cast_test.nwl")
+        fnm = os.path.join(DATADIR, "cast_test.nwl")
         self.cast.save(fnm)
 
-        fnm = os.path.join(datadir, "ctd_test.nwl")
+        fnm = os.path.join(DATADIR, "ctd_test.nwl")
         self.ctd.save(fnm)
 
-        fnm = os.path.join(datadir, "xbt_test.nwl")
+        fnm = os.path.join(DATADIR, "xbt_test.nwl")
         self.xbt.save(fnm)
         return
 
-    def test_load(self):
-        directory = os.path.dirname(__file__)
-        datadir = os.path.join(directory, "data")
+    def test_save_collection(self):
+        fnm = os.path.join(DATADIR, "coll_test.nwl")
+        self.collection.save(fnm)
+        return
 
-        cast = narwhal.read(os.path.join(datadir, "reference_cast_test.nwl"))
-        ctd = narwhal.read(os.path.join(datadir, "reference_ctd_test.nwl"))
-        xbt = narwhal.read(os.path.join(datadir, "reference_xbt_test.nwl"))
+    def test_save_zprimarykey(self):
+        cast = Cast(np.arange(len(self.p)), temp=self.temp, sal=self.sal,
+                    primarykey="z", properties={})
+        cast.save(os.path.join(DATADIR, "ctdz_test.nwl"))
+        return
+
+    def test_load(self):
+        cast = narwhal.read(os.path.join(DATADIR, "reference_cast_test.nwl"))
+        ctd = narwhal.read(os.path.join(DATADIR, "reference_ctd_test.nwl"))
+        xbt = narwhal.read(os.path.join(DATADIR, "reference_xbt_test.nwl"))
         self.assertEqual(cast, self.cast)
         self.assertEqual(ctd, self.ctd)
         self.assertEqual(xbt, self.xbt)
         return
+
+    def test_load_collection(self):
+        coll = narwhal.read(os.path.join(DATADIR, "reference_coll_test.nwl"))
+        self.assertEqual(coll, self.collection)
+        return
+
+    def test_load_zprimarykey(self):
+        castl = narwhal.read(os.path.join(DATADIR, "reference_ctdz_test.nwl"))
+        cast = Cast(np.arange(len(self.p)), temp=self.temp, sal=self.sal,
+                    primarykey="z", properties={})
+        self.assertEqual(cast, castl)
 
 class MiscTests(unittest.TestCase):
 

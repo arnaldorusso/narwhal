@@ -2,6 +2,7 @@
 Cast and CastCollection classes for managing CTD observations
 """
 
+import os
 import sys
 import itertools
 import collections
@@ -12,6 +13,12 @@ import scipy.integrate as scint
 from karta import Point, LONLAT
 from . import fileio
 from . import gsw
+
+
+# Global physical constants
+G = 9.8
+OMEGA = 2*np.pi / 86400.0
+
 
 class Cast(object):
     """ A Cast is a set of referenced measurements associated with a single
@@ -102,9 +109,9 @@ class Cast(object):
         return
 
     def __add__(self, other):
-        if hasattr(other, "_type") and (other._type == "cast"):
+        if hasattr(other, "_type") and (other._type[-4:] == "cast"):
             return CastCollection(self, other)
-        elif hasattr(other, "_type") and (other._type == "ctd_collection"):
+        elif hasattr(other, "_type") and (other._type == "castcollection"):
             return CastCollection(self, *[a for a in other])
         else:
             raise TypeError("No rule to add {0} to {1}".format(type(self), 
@@ -120,6 +127,22 @@ class Cast(object):
         else:
             return True
 
+    def _addkeydata(self, key, data, overwrite=False):
+        """ Add data under *key*. If *key* already exists, iterates over
+        [key]_2, [key]_3... until an unused identifier is found. Returns the
+        key finally used.
+
+        Use case: for automatic addition of fields.
+        """
+        key_ = key
+        if not overwrite:
+            i = 2
+            while key_ in self.data:
+                key_ = key + "_" + str(i)
+                i += 1
+        self.data[key_] = data
+        return key_
+
     def nanmask(self):
         """ Return a mask for observations containing at least one NaN. """
         vectors = [a for a in self.data.values() if hasattr(a, "__iter__")]
@@ -132,7 +155,8 @@ class Cast(object):
         return nv
 
     def interpolate(self, y, x, v, force=False):
-        """ Interpolate property y as a function of property x at values given by vector x=v.
+        """ Interpolate property y as a function of property x at values given
+        by vector x=v.
 
         y::string       name of property to interpolate
         x::string       name of reference property
@@ -163,6 +187,8 @@ class Cast(object):
 
         fnm::string     File name to save to
         """
+        if os.path.splitext(fnm)[1] != ".nwl":
+            fnm = fnm + ".nwl"
         with open(fnm, "w") as f:
             fileio.writecast(f, self)
         return
@@ -173,20 +199,40 @@ class CTDCast(Cast):
     fields. """
     _type = "ctdcast"
 
-    def __init__(self, p, sal=None, temp=None, coords=None, properties=None,
+    def __init__(self, p, sal, temp, coords=None, properties=None,
                  **kwargs):
         super(CTDCast, self).__init__(p, sal=sal, temp=temp, coords=coords,
                                       properties=properties, **kwargs)
         return
 
+    def add_density(self):
+        """ Add in-situ density to fields, and return the field name. """
+        constemp = (gsw.ct_from_t(sa, t, p) for (sa, t, p)
+                        in zip(self["sal"], self["temp"], self["pres"]))
+        rho = np.array([gsw.rho(sa, ct, p) for (sa, ct, p)
+                        in zip(self["sal"], constemp, self["pres"])])
+        return self._addkeydata("rho", rho)
+
+    def add_depth(self, rhokey=None):
+        """ Use temperature, salinity, and pressure to calculate depth. If
+        in-situ density is already in a field, *rhokey* can be provided to
+        avoid recalculating it. """
+        if rhokey is None:
+            rhokey = self.add_density()
+        rho = self[rhokey]
+        depth = self["pres"] / (rho * G) * 1e4
+        return self._addkeydata("depth", depth)
+
+
 class LADCP(Cast):
     """ Specialization of Cast for LADCP data. Requires *u* and *v* fields. """
     _type = "ladcpcast"
 
-    def __init__(self, z, u=None, v=None, err=None, coords=None, properties=None,
-                 **kwargs):
-        super(LADCP, self).__init__(z, u=u, v=v, err=err, coords=coords,
-                                    properties=properties, **kwargs)
+    def __init__(self, z, u, v, coords=None, properties=None,
+                 primarykey="z", **kwargs):
+        super(LADCP, self).__init__(z, u=u, v=v, coords=coords,
+                                    properties=properties, primarykey=primarykey,
+                                    **kwargs)
         return
 
 
@@ -194,7 +240,7 @@ class XBTCast(Cast):
     """ Specialization of Cast with temperature field. """
     _type = "xbtcast"
 
-    def __init__(self, p, temp=None, coords=None, properties=None, **kwargs):
+    def __init__(self, p, temp, coords=None, properties=None, **kwargs):
         super(XBTCast, self).__init__(p, temp=temp, coords=coords,
                                       properties=properties, **kwargs)
         return
@@ -202,14 +248,15 @@ class XBTCast(Cast):
 
 class CastCollection(collections.Sequence):
     """ A CastCollection is an indexable collection of Cast instances """
-    _type = "ctd_collection"
+    _type = "castcollection"
 
     def __init__(self, *args):
         if len(args) == 0:
             self.casts = []
         elif isinstance(args[0], Cast):
             self.casts = list(args)
-        elif (len(args) == 1) and (False not in (isinstance(a, Cast) for a in args[0])):
+        elif (len(args) == 1) and \
+                (False not in (isinstance(a, Cast) for a in args[0])):
             self.casts = args[0]
         else:
             raise TypeError("Arguments must be either Cast types or an "
@@ -229,6 +276,16 @@ class CastCollection(collections.Sequence):
         else:
             raise KeyError("Key {0} not found in all casts".format(key))
 
+    def __eq__(self, other):
+        if not hasattr(other, "_type") or (self._type != other._type):
+            return False
+        if len(self) != len(other):
+            return False
+        for (ca, cb) in zip(self, other):
+            if ca != cb:
+                return False
+        return True
+
     def __contains__(self, cast):
         return True if (cast in self.casts) else False
 
@@ -236,13 +293,13 @@ class CastCollection(collections.Sequence):
         return (a for a in self.casts)
 
     def __add__(self, other):
-        if hasattr(other, "_type") and (other._type == "ctd_collection"):
+        if hasattr(other, "_type") and (other._type == "castcollection"):
             return CastCollection(list(a for a in itertools.chain(self.casts, other.casts)))
-        elif hasattr(other, "_type") and (other._type == "cast"):
+        elif hasattr(other, "_type") and (other._type[-4:] == "cast"):
             return CastCollection(self.casts + [other])
         else:
-            raise TypeError("Addition requires both arguments to fulfill the "
-                            "ctd_collection interface")
+            raise TypeError("Can only add castcollection and *cast types to "
+                            "CastCollection")
 
     def add_bathymetry(self, bathymetry):
         """ Reference Bathymetry instance `bathymetry` to CastCollection.
@@ -284,12 +341,14 @@ class CastCollection(collections.Sequence):
         return np.asarray(cumulative, dtype=np.float64)
 
     def thermal_wind(self, tempkey="temp", salkey="sal", rhokey=None,
-                     dudzkey="dUdz", ukey="U", overwrite=False):
+                     dudzkey="dudz", ukey="u", overwrite=False):
         """ Compute profile-orthagonal velocity shear using hydrostatic thermal
         wind. In-situ density is computed from temperature and salinity unless
         *rhokey* is provided.
 
-        Add a U field and a ∂U/∂z field to each cast in the collection.
+        Adds a U field and a ∂U/∂z field to each cast in the collection. As a
+        side-effect, if casts have no "depth" field, one is added and populated
+        from temperature and salinity fields.
         
         Parameters
         ----------
@@ -302,7 +361,6 @@ class CastCollection(collections.Sequence):
                         if False, then *ukey* and *dudzkey* are incremented
                         until there is no clash
         """
-
         if rhokey is None:
             Temp = self.asarray(tempkey)
             Sal = self.asarray(salkey)
@@ -320,26 +378,20 @@ class CastCollection(collections.Sequence):
             rho = self.asarray(rhokey)
             (m, n) = rho.shape
 
-        g = 9.8
-        omega = 2*np.pi / 86400.0
-        drho = diff2(rho, self.projdist())
-        dUdz = -(g / rho * drho) / (2*omega)
-        U = uintegrate(dUdz, self.asarray("pres"))
+        for cast in self:
+            if "depth" not in cast.data.keys():
+                cast.add_depth()
 
-        dudzkey_ = dudzkey
-        ukey_ = ukey
+        g = G
+        omega = OMEGA
+        drho = diff2(rho, self.projdist())
+        sinphi = np.sin([c.coords[1]*np.pi/180.0 for c in self.casts])
+        dudz = (g / rho * drho) / (2*omega*sinphi)
+        u = uintegrate(dudz, self.asarray("depth"))
+
         for (ic,cast) in enumerate(self.casts):
-            if not overwrite:
-                i = 2
-                while dudzkey_ in cast.data:
-                    dudzkey_ = dudzkey + "_" + str(i)
-                    i += 1
-                i = 2
-                while ukey_ in cast.data:
-                    ukey_ = ukey + "_" + str(i)
-                    i += 1
-            cast.data[dudzkey_] = dUdz[:,ic]
-            cast.data[ukey_] = U[:,ic]
+            cast._addkeydata(dudzkey, dudz[:,ic], overwrite=overwrite)
+            cast._addkeydata(ukey, u[:,ic], overwrite=overwrite)
         return
 
     def save(self, fnm):
@@ -347,9 +399,10 @@ class CastCollection(collections.Sequence):
 
         fnm::string     File name to save to
         """
+        if os.path.splitext(fnm)[1] != ".nwl":
+            fnm = fnm + ".nwl"
         with open(fnm, "w") as f:
             fileio.writecastcollection(f, self)
-
 
 
 def force_monotonic(u):
@@ -374,6 +427,11 @@ def read(fnm):
     """ Convenience function for reading JSON-formatted measurement data. """
     with open(fnm, "r") as f:
         d = json.load(f)
+    return _fromjson(d)
+
+def _fromjson(d):
+    """ Lower level function to (possibly recursively) convert JSON into
+    narwhal object. """
     typ = d.get("type", None)
     if typ == "cast":
         return fileio.dictascast(d, Cast)
@@ -383,12 +441,13 @@ def read(fnm):
         return fileio.dictascast(d, XBTCast)
     elif typ == "ladcpcast":
         return fileio.dictascast(d, LADCP)
-    elif typ == "ctd_collection":
-        return CastCollection(fileio.dictascastcollection(d, Cast))
+    elif typ == "castcollection":
+        casts = [_fromjson(castdict) for castdict in d["casts"]]
+        return CastCollection(casts)
     elif typ is None:
-        raise IOError("couldn't read data type - file may be corrupt")
+        raise AttributeError("couldn't read data type - file may be corrupt")
     else:
-        raise IOError("Invalid type: {0}".format(typ))
+        raise LookupError("Invalid type: {0}".format(typ))
 
 def diff1(V, x):
     """ Compute hybrid centred/sided difference of vector V with positions given by x """
@@ -413,7 +472,7 @@ def diff2(A, x):
                 if j - start != 1:
                     D2[i,start:j] = diff1(arow[start:j], x[start:j])
                 else:
-                    assert j-start == 1    # if this isn't true, I screwed up somewhere
+                    assert j-start == 1
                 start = -1
             elif start != -1 and j == len(arow) - 1:
                 D2[i,start:] = diff1(arow[start:], x[start:])
