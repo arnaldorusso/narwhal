@@ -15,11 +15,13 @@ virtualenv:
 before_install:
   - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
-  - python -c "import sys; print(sys.path)"
   - ./miniconda.sh -b
   - python -c "import sys; print(sys.path)"
   - export PATH=/home/travis/miniconda/bin:$PATH
+  - OLDPATH=$PATH
   - conda update --yes conda
+  - python -c "import sys; print(sys.path)"
+  - export PATH=$PATH:$OLDPATH
   - python -c "import sys; print(sys.path)"
 
 install:
@@ -31,8 +33,8 @@ install:
   - pip install pyshp
   - pip install pyproj
   - pip install requests
+  - pip install dateutil
   - pip install . -v
-  - python -c "import sys; print(sys.path)"
   - python -c "import narwhal"
 
 script:
