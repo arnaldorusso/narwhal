@@ -29,7 +29,6 @@ install:
   - source activate test-environment
   - pip install karta pyshp pyproj requests python-dateutil
   - pip install . -v
-  - python -c "import narwhal"
 
 script:
   python tests/runtests.py
