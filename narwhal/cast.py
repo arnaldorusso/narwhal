@@ -296,8 +296,6 @@ class CastCollection(collections.Sequence):
         if len(self) != len(other):
             return False
         for (ca, cb) in zip(self, other):
-            print(type(ca), type(cb))
-            print(ca==cb, ca!=cb)
             if ca != cb:
                 return False
         return True
