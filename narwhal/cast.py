@@ -301,6 +301,10 @@ class CastCollection(collections.Sequence):
             return False
         for (ca, cb) in zip(self, other):
             if ca != cb:
+                print()
+                print(type(ca), ca)
+                print(type(cb), cb)
+                print(ca == cb)
                 return False
         return True
 
