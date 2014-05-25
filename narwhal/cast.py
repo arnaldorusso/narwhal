@@ -122,6 +122,14 @@ class Cast(object):
                 self.coords != other.coords or \
                 False in (np.all(self.data[k] == other.data[k])
                                 for k in self._fields):
+            print()
+            print(self._fields, other._fields)
+            print(self.coords, other.coords)
+            print(self.properties, other.properties)
+            for k in self._fields:
+                if self.data[k] != other.data[k]:
+                    print(self.data[k])
+                    print(other.data[k])
             return False
         else:
             return True
@@ -288,14 +296,11 @@ class CastCollection(collections.Sequence):
 
     def __eq__(self, other):
         if not hasattr(other, "_type") or (self._type != other._type):
-            print("type inequality")
             return False
         if len(self) != len(other):
-            print("length inequality")
             return False
         for (ca, cb) in zip(self, other):
             if ca != cb:
-                print("cast inequality")
                 return False
         return True
 
