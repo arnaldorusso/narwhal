@@ -288,11 +288,14 @@ class CastCollection(collections.Sequence):
 
     def __eq__(self, other):
         if not hasattr(other, "_type") or (self._type != other._type):
+            print("type inequality")
             return False
         if len(self) != len(other):
+            print("length inequality")
             return False
         for (ca, cb) in zip(self, other):
             if ca != cb:
+                print("cast inequality")
                 return False
         return True
 
