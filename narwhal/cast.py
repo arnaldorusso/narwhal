@@ -122,14 +122,6 @@ class Cast(object):
                 self.coords != other.coords or \
                 False in (np.all(self.data[k] == other.data[k])
                                 for k in self._fields):
-            print()
-            print(self._fields, other._fields)
-            print(self.coords, other.coords)
-            print(self.properties, other.properties)
-            for k in self._fields:
-                if self.data[k] != other.data[k]:
-                    print(self.data[k])
-                    print(other.data[k])
             return False
         else:
             return True
@@ -302,9 +294,8 @@ class CastCollection(collections.Sequence):
         for (ca, cb) in zip(self, other):
             if ca != cb:
                 print()
-                print(type(ca), ca)
-                print(type(cb), cb)
                 print(ca == cb)
+                print(ca != cb)
                 return False
         return True
 
