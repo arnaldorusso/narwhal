@@ -1,64 +1,34 @@
-import copy
+# -*- coding: utf-8 -*-
 import numbers
 import numpy as np
-import scipy.integrate as scint 
-from narwhal.cast import Cast
+import scipy.integrate as scint
+from scipy.ndimage.morphology import binary_dilation
+from scipy import sparse
 
-def _nanmean(arr, axis=0):
-    """ Re-implement nanmean in a way that doesn't fire off warning when there
-    are NaN-filled rows. 
-    
-    Note that here axis is the axis to retain, which is not the behaviour of
-    np.nanmean. I did it this way for simplicity, but this might be confusing
-    in the future.
-    """
-    if axis != 0:
-        arr = np.rollaxis(arr, axis)
-    means = np.empty(arr.shape[0], dtype=arr.dtype)
-    i = 0
-    for row in arr:
-        valid = row[~np.isnan(row)]
-        if len(valid) > 0:
-            means[i] = np.mean(row[~np.isnan(row)])
-        else:
-            means[i] = np.nan
-        i += 1
-    return means
+def sparse_diffmat(n, deriv, h, order=2):
+    """ Return an `n::Int` by `n` sparse difference matrix to approximate a
+    `deriv::int` derivative with spacing `h::float` to `order::int`-order
+    accuracy. """
+    if hasattr(h, "__len__"):
+        raise NotImplementedError("only evenly spaced data are supported right now")
+    if deriv == 1 and order == 2:
+        I = np.ones(n)
+        I_ = np.ones(n-1)
+        D = sparse.diags((0.5*I_, -0.5*I_), (1, -1)) / h
+        D = D.tolil()
+        D[0,:3] = np.asarray([-1.5, 2, -0.5]) / h
+        D[-1,-3:] = np.asarray([-0.5, 2, -1.5]) / h
 
-def ccmeans(cc):
-    """ Calculate a mean Cast along isopycnals from a CastCollection. """
-    c0 = max(cc, key=lambda c: c.nvalid())
-    s0 = c0["sigma"]
-    sharedkeys = set(c0.data.keys()).intersection(
-                    *[set(c.data.keys()) for c in cc[1:]]).difference(
-                    set(("pres", "botdepth", "time")))
-    nanmask = reduce(lambda a,b: a*b, [c.nanmask() for c in cc])
-    data = dict()
-    for key in sharedkeys:
-        arr = np.nan * np.empty((len(cc), len(c0["pres"])))
-        arr[0,:] = c0[key]
-        for j, c in enumerate(cc[1:]):
-            s = np.convolve(c["sigma"], np.ones(3)/3.0, mode="same")
-            arr[j+1,:] = np.interp(s0, s, c[key])
-        data[key] = _nanmean(arr, axis=1)
-        data[key][nanmask] = np.nan
-
-    return Cast(copy.copy(c0["pres"]), **data)
-
-def ccmeanp(cc):
-    if False in (np.all(cc[0]["pres"] == c["pres"]) for c in cc):
-        raise ValueError("casts must share pressure levels")
-    p = cc[0]["pres"]
-    # shared keys are those in all casts, minus pressure and botdepth
-    sharedkeys = set(cc[0].data.keys()).intersection(
-                    *[set(c.data.keys()) for c in cc[1:]]).difference(
-                    set(("pres", "botdepth", "time")))
-    data = dict()
-    for key in sharedkeys:
-        arr = np.vstack([c.data[key] for c in cc])
-        data[key] = _nanmean(arr, axis=1)
-
-    return Cast(p, **data)
+    elif deriv == 2 and order == 2:
+        I = np.ones(n)
+        I_ = np.ones(n-1)
+        D = sparse.diags((I_, -2*I, I_), (1, 0, -1)) / h**2
+        D = D2.tolil()
+        D[0,:4] = np.asarray([2, -5, 4, -1]) / h**2
+        D[-1,-4:] = np.asarray([-1, 4, -5, 2]) / h**2
+    else:
+        raise NotImplementedError("{0} order {1}-derivative".format(order, deriv))
+    return D
 
 def force_monotonic(u):
     """ Given a nearly monotonically-increasing vector u, return a vector u'
@@ -66,17 +36,11 @@ def force_monotonic(u):
 
     u::iterable         vector to adjust
     """
-    # naive implementation
-    #v = u.copy()
-    #for i in xrange(1, len(v)):
-    #    if v[i] <= v[i-1]:
-    #        v[i] = v[i-1] + 1e-16
-    #return v
-
-    # more efficient implementation
-    v = [u1 if u1 > u0 else u0 + 1e-16
-            for u0, u1 in zip(u[:-1], u[1:])]
-    return np.hstack([u[0], v])
+    v = u.copy()
+    for i in range(1, len(v)):
+        if v[i] <= v[i-1]:
+            v[i] = v[i-1] + 1e-16
+    return v
 
 def diff1(V, x):
     """ Compute hybrid centred/sided difference of vector V with positions given by x """
@@ -106,6 +70,84 @@ def diff2(A, x):
 
             elif start != -1 and j == len(arow) - 1:
                 D2[i,start:] = diff1(arow[start:], x[start:])
+    return D2
+
+def diff2_dinterp(A_, x):
+    """ Perform row-wise differences in array A. Handle NaNs by extrapolating
+    differences downward, performing a centred differences, and replacing the
+    NaN values in the output.
+
+    Compared to diff2 and diff2_inner, this is a generally much less accurate
+    approximation (L-∞), however it has the virtue of allowing centred
+    differences everywhere, avoiding non-physical jumps in the resulting field.
+    """
+
+    def erode_nans(u, du):
+        """ Given u and a derivative du, extend u whereever a NaN borders a non-NaN """
+        isnan = np.isnan
+        for j in range(len(u)):
+
+            if isnan (u[j]) and j != 0 and j != len(u)-1:
+                if isnan(u[j+1]) and not isnan(u[j-1]):
+                    d = 0.5 * (du[j] + du[j-1])
+                    u[j] = u[j-1] + d
+                elif not isnan(u[j+1]) and isnan(u[j-1]):
+                    d = 0.5 * (du[j] + du[j+1])
+                    u[j] = u[j+1] - d
+                elif not isnan(u[j+1]) and not isnan(u[j-2]):
+                    #u[j] = 0.5 * (u[j-1] + u[j+1])
+                    u[j] = 0.5 * (u[j-1] + 0.5 * (du[j] + du[j-1]) +
+                                  u[j+1] - 0.5 * (du[j] + du[j+1]))
+                else:
+                    pass
+
+            elif j == 0 and isnan(u[j]) and not isnan(u[j+1]):
+                u[j] = u[j+1] - 0.5 * (du[j] + du[j+1])
+
+            elif j == len(u)-1 and isnan(u[j]) and not isnan(u[j-1]):
+                u[j] = u[j-1] + 0.5 * (du[j] + du[j-1])
+
+            else:
+                pass
+
+        return u
+
+    A = A_.copy()
+    D2 = np.empty_like(A_)
+    for (i, row) in enumerate(A):
+
+        if np.any(np.isnan(row)):
+
+            if not np.all(np.isnan(row)) and i != 0:
+
+                while np.any(np.isnan(row)):
+                    row = erode_nans(row, D2[i-1,:])
+                A[i,:] = row
+
+            else:
+
+                # Extend upward
+                for j in range(len(row)):
+
+                    if np.isnan(row[j]):
+                        k = 0
+                        while k != A.shape[0]-1:
+                            if not np.isnan(A[k,j]):
+                                A[:k,j] = A[k,j]
+                                break
+                            k += 1
+
+                        if k == A.shape[0]-1:
+                            raise ValueError("there's a whole column of NaNs")
+
+        D2[i,:] = diff1(A[i,:], x)
+
+        if i != 0:                      # Replace differences with the previous row
+            nans = np.isnan(A_[i,:])    # to avoid propagating synthetic data
+            nans = binary_dilation(nans)
+            D2[i,nans] = D2[i-1,nans]
+
+    D2[np.isnan(A_)] = np.nan
     return D2
 
 def diff1_inner(V, x):
@@ -142,7 +184,7 @@ def uintegrate(dudz, X, ubase=0.0):
     U = -np.nan*np.empty_like(dudz)
     if isinstance(ubase, numbers.Number):
         ubase = ubase * np.ones(dudz.shape[1], dtype=np.float64)
-    
+
     for jcol in range(dudz.shape[1]):
         # find the deepest non-NaN
         imax = np.max(np.arange(dudz.shape[0])[~np.isnan(dudz[:,jcol])])
