@@ -45,9 +45,7 @@ class Cast(object):
     arguments. There are several reserved keywords:
 
     coords::iterable[2]     the geographic coordinates of the observation
-
     zunit::Unit             the independent vector units [default: meter]
-
     zname::string           name for the independent vector [default: "z"]
     """
 
@@ -60,7 +58,6 @@ class Cast(object):
 
         self.zunits = zunits
         self.zname = zname
-        self._len = len(z)
         self.p = self.properties
 
         # Python 3 workaround
@@ -70,12 +67,12 @@ class Cast(object):
             items = kwargs.items()
 
         # Populate vector and scalar data fields
-        data[zname] = pandas.Series(data=z, index=z, name=zname)
+        data[zname] = pandas.Series(data=z, name=zname)
         for (kw, val) in items:
             if isinstance(val, collections.Container) and \
                     not isinstance(val, str) and \
                     len(val) == len(z):
-                data[kw] = pandas.Series(data=val, index=z, name=kw)
+                data[kw] = pandas.Series(data=val, name=kw)
             else:
                 self.properties[kw] = val
         self.properties["coordinates"] = tuple(coords)
@@ -83,7 +80,7 @@ class Cast(object):
         return
 
     def __len__(self):
-        return self._len
+        return len(self.data.index)
 
     def __str__(self):
         if self.coords is not None:
@@ -97,17 +94,13 @@ class Cast(object):
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            if 0 <= key < self._len:
+            if 0 <= key < len(self):
                 return self.data.irow(key)
             else:
                 raise IndexError("{0} not within cast length "
-                                 "({1})".format(key, self._len))
+                                 "({1})".format(key, len(self)))
         elif key in self.data:
             return self.data[key]
-        # elif key == "depth" and self.zunit == units.meter:
-        #     return self.data["z"]
-        # elif key == "pres" and self.zunit == units.decibar:
-        #     return self.data["z"]
         else:
             raise KeyError("No field {0}".format(key))
         return
@@ -115,7 +108,7 @@ class Cast(object):
     def __setitem__(self, key, val):
         if isinstance(key, str):
             if isinstance(val, collections.Container) and \
-                    not isinstance(val, str) and len(val) == self._len:
+                    not isinstance(val, str) and len(val) == len(self):
                 self.data[key] = val
                 if key not in self.fields:
                     self.fields.append(key)
@@ -138,7 +131,7 @@ class Cast(object):
                                                                type(other)))
 
     def __eq__(self, other):
-        if any(self.fields != other.fields) or \
+        if set(self.fields) != set(other.fields) or \
                 self.properties != other.properties or \
                 any(np.any(self.data[k] != other.data[k]) for k in self.fields):
             return False
@@ -167,7 +160,7 @@ class Cast(object):
 
     @property
     def fields(self):
-        return self.data.keys()
+        return list(self.data.columns)
 
     @property
     def coords(self):
@@ -176,9 +169,9 @@ class Cast(object):
     def nanmask(self, fields=None):
         """ Return a mask for observations containing at least one NaN. """
         if fields is None:
-            fields = self.fields
-        vectors = [v for (k,v) in self.data.items() if k in fields]
-        return np.isnan(np.vstack(vectors).sum(axis=0))
+            return self.data.isnull().apply(lambda r: any(r), axis=1).values
+        else:
+            return self.data.isnull().select(lambda n: n in fields, axis=1).apply(lambda r: any(r), axis=1).values
 
     def nvalid(self, fields=None):
         """ Return the number of complete (non-NaN) observations. """
@@ -198,7 +191,6 @@ class Cast(object):
         if n > 0:
             empty_df = pandas.DataFrame({self.zname: np.nan * np.empty(n)})
             self.data = pandas.concat([self.data, empty_df], ignore_index=True)
-            self._len += n
         else:
             raise ValueError("Cast must be extended with 1 or more rows")
         return
@@ -208,15 +200,12 @@ class Cast(object):
         by vector x=v.
 
         y::string       name of property to interpolate
-
         x::string       name of reference property
-
         v::iterable     vector of values for x
-
         force::bool     whether to coerce x to be monotonic (defualt False)
 
-        Note: it's difficult to interpolate when x is not monotic, because this
-        makes y not a true function. However, it's resonable to want to
+        Note: it's difficult to interpolate when x is not monotonic, because
+        this makes y not a true function. However, it's resonable to want to
         interpolate using rho or sigma as x. These should be essentially
         monotonic, but might not be due to measurement noise. The keyword
         argument `force` can be provided as True, which causes nonmonotonic x
@@ -238,12 +227,11 @@ class Cast(object):
         """ Re-interpolate Cast at specified grid levels. Returns a new Cast. """
         # some low level voodoo
         ret = copy.deepcopy(self)
-        ret._len = len(levels)
-        for key in self.data:
-            if key is not self.primarykey:
-                ret.data[key] = np.interp(levels, self[self.primarykey], self[key],
-                                          left=np.nan, right=np.nan)
-        ret.data[self.primarykey] = levels
+        newdata = pandas.DataFrame(index=levels)
+        for key in self.fields:
+            newdata[key] = np.interp(levels, self.data[self.zname], self[key],
+                                     left=np.nan, right=np.nan)
+        ret.data = newdata
         return ret
 
     def save(self, fnm, binary=True):
@@ -269,11 +257,8 @@ class Cast(object):
         pressure to fields. Return the field name.
         
         salkey::string              Data key to use for salinity
-
         tempkey::string             Data key to use for in-situ temperature
-
         preskey::string             Data key to use for pressure
-
         rhokey::string              Data key to use for in-situ density
         """
         if salkey in self.fields and tempkey in self.fields and \
@@ -288,31 +273,27 @@ class Cast(object):
             raise FieldError("add_density requires salinity, temperature, and "
                              "pressure fields")
 
-    def add_depth(self, preskey="pres", rhokey="rho", depthkey="depth"):
+    def add_depth(self, preskey="pres", rhokey="rho", depthkey="z"):
         """ Use density and pressure to calculate depth.
         
         preskey::string             Data key to use for pressure
-
         rhokey::string              Data key to use for in-situ density
-
         depthkey::string            Data key to use for depth
         """
-        if preskey == "z" and self.zunits != units.decibar:
+        if preskey not in self.fields:
             raise FieldError("add_depth requires a pressure field")
         if rhokey not in self.fields:
             raise FieldError("add_depth requires a density field")
-        rho = self[rhokey]
+        rho = self[rhokey].copy()
 
-        # remove initial NaNs by replacing them with the first non-NaN
-        nnans = 0
-        r = rho[0]
-        while np.isnan(r):
-            nnans += 1
-            r = rho[nnans]
-        rho[:nnans] = rho[nnans+1]
+        # remove initial NaNs in Rho by replacing them with the first non-NaN
+        idx = 0
+        while np.isnan(rho.iloc[idx]):
+            idx += 1
+        rho.iloc[:idx] = rho.iloc[idx]
 
-        dp = np.hstack([self[preskey][0], np.diff(self[preskey])])
-        dz = dp / (rho * G) * 1e4
+        dp = np.hstack([0.0, np.diff(self[preskey])])
+        dz = dp / (rho.interpolate() * G) * 1e4
         depth = np.cumsum(dz)
         return self._addkeydata(depthkey, depth)
 
@@ -321,18 +302,13 @@ class Cast(object):
         Uses a smoothing spline to compute derivatives.
         
         rhokey::string              Data key to use for in-situ density
-
         depthkey::string            Data key to use for depth
-
         N2key::string               Data key to use for N^2
-
         s::float                    Spline smoothing factor (smaller values
                                     give a noisier result)
         """
         if rhokey not in self.fields:
             raise FieldError("add_Nsquared requires in-situ density")
-        if depthkey == "z" and self.zunits != units.meter:
-            raise FieldError("add_Nsquared requires depth in meters")
         msk = self.nanmask((rhokey, depthkey))
         rho = self[rhokey][~msk]
         z = self[depthkey][~msk]
@@ -343,7 +319,7 @@ class Cast(object):
         N2[~msk] = -G / rho * drhodz
         return self._addkeydata(N2key, N2)
 
-    def baroclinic_modes(self, nmodes, ztop=10, N2key="N2", depthkey="depth"):
+    def baroclinic_modes(self, nmodes, ztop=10, N2key="N2", depthkey="z"):
         """ Calculate the baroclinic normal modes based on linear
         quasigeostrophy and the vertical stratification. Return the first
         `nmodes::int` deformation radii and their associated eigenfunctions.
@@ -353,9 +329,7 @@ class Cast(object):
 
         ztop                        the depth at which to cut off the profile,
                                     to avoid surface effects
-
         N2key::string               Data key to use for N^2
-
         depthkey::string            Data key to use for depth
         """
         if N2key not in self.fields or depthkey not in self.fields:
@@ -427,9 +401,7 @@ class Cast(object):
         smooth the data with a gaussian filter before computing the derivative.
 
         depthkey::string            Data key to use for depth
-
         vkey,ukey::string           Data key to use for u,v velocity
-
         dudzkey,dvdzkey::string     Data key to use for u,v velocity shears
         """
         if ukey not in self.fields or vkey not in self.fields:
@@ -482,9 +454,9 @@ class CastCollection(collections.Sequence):
     def __init__(self, *args):
         if len(args) == 0:
             self.casts = []
-        elif isinstance(args[0], Cast):
+        elif isinstance(args[0], AbstractCast):
             self.casts = list(args)
-        elif (len(args) == 1) and all(isinstance(a, Cast) for a in args[0]):
+        elif (len(args) == 1) and all(isinstance(a, AbstractCast) for a in args[0]):
             self.casts = args[0]
         else:
             raise TypeError("Arguments must be either Cast types or an "
@@ -575,10 +547,27 @@ class CastCollection(collections.Sequence):
                 return cast
         raise LookupError("Cast not found with {0} = {1}".format(key, value))
 
-    def castswhere(self, key, values):
-        """ Return all casts with a property key that is in `values::Container`
+    def castswhere(self, key, values=None):
+        """ Return all casts satisfying criteria. Criteria are specified using
+        one of the following patterns:
+
+        - f::function, in which case all casts satisfying `f(cast) == True` are
+          returned
+
+        - k::string and f::function, in which case all casts for which
+          `f(cast[key]) == True` are returned
+
+        - k::string and L::Container, in which case all casts for which
+          `cast[key] is in L == True` are returned
+
+        with a property key that is in `values::Container`
         """
         casts = []
+        if values is None:
+            if hasattr(key, "__call__"):
+                return CastCollection([c for c in self if key(c)])
+            else:
+                raise ValueError("If one argument is given, it must be a function")
         if hasattr(values, "__call__"):
             func = values
             for cast in self.casts:
@@ -618,15 +607,15 @@ class CastCollection(collections.Sequence):
         return CastCollection(casts)
 
     def asarray(self, key):
-        """ Naively return values as an array, assuming that all casts are indexed
-        with the same pressure levels.
+        """ Naively return values as an array, assuming that all casts are
+        indexed with the same pressure levels.
 
         key::string                     property to return
         """
-        nrows = max(cast._len for cast in self.casts)
+        nrows = max(len(cast) for cast in self.casts)
         arr = np.nan * np.empty((nrows, len(self.casts)), dtype=np.float64)
         for i, cast in enumerate(self.casts):
-            arr[:cast._len, i] = cast[key]
+            arr[:len(cast), i] = cast[key]
         return arr
 
     def projdist(self):
@@ -654,15 +643,10 @@ class CastCollection(collections.Sequence):
         ----------
 
         tempkey::string     key to use for temperature if *rhokey* is None
-
         salkey::string      key to use for salinity if *rhokey* is None
-
         rhokey::string      key to use for density, or None [default: None]
-
         dudzkey::string     key to use for ∂U/∂z, subject to *overwrite*
-
         ukey::string        key to use for U, subject to *overwrite*
-
         overwrite::bool     whether to allow cast fields to be overwritten
                             if False, then *ukey* and *dudzkey* are incremented
                             until there is no clash
@@ -681,13 +665,13 @@ class CastCollection(collections.Sequence):
         (m, n) = rho.shape
 
         for cast in self:
-            if "depth" not in cast.data.keys():
+            if "z" not in cast.data.keys():
                 cast.add_depth()
 
         drho = util.diff2_dinterp(rho, self.projdist())
         sinphi = np.sin([c.coords[1]*np.pi/180.0 for c in self.casts])
         dudz = (G / rho * drho) / (2*OMEGA*sinphi)
-        u = util.uintegrate(dudz, self.asarray("depth"))
+        u = util.uintegrate(dudz, self.asarray("z"))
 
         for (ic,cast) in enumerate(self.casts):
             cast._addkeydata(dudzkey, dudz[:,ic], overwrite=overwrite)
@@ -712,15 +696,10 @@ class CastCollection(collections.Sequence):
         ----------
 
         tempkey::string     key to use for temperature if *rhokey* is None
-
         salkey::string      key to use for salinity if *rhokey* is None
-
         rhokey::string      key to use for density, or None [default: None]
-
         dudzkey::string     key to use for ∂U/∂z, subject to *overwrite*
-
         ukey::string        key to use for U, subject to *overwrite*
-
         overwrite::bool     whether to allow cast fields to be overwritten
                             if False, then *ukey* and *dudzkey* are incremented
                             until there is no clash
@@ -751,7 +730,7 @@ class CastCollection(collections.Sequence):
             p = avgcolumns(self[i]["pres"], self[i+1]["pres"])
             t = avgcolumns(self[i]["temp"], self[i+1]["temp"])
             s = avgcolumns(self[i]["sal"], self[i+1]["sal"])
-            cast = CTDCast(p, temp=t, sal=s, primarykey="pres", coords=cmid)
+            cast = CTDCast(p, temp=t, sal=s, zname="pres", coords=cmid)
             cast.add_depth()
             cast.properties[bottomkey] = 0.5 * (self[i].properties[bottomkey] +
                                                 self[i+1].properties[bottomkey])
@@ -762,7 +741,7 @@ class CastCollection(collections.Sequence):
         sinphi = np.sin([c.coords[1]*np.pi/180.0 for c in midcasts])
         rhoavg = 0.5 * (rho[:,:-1] + rho[:,1:])
         dudz = (G / rhoavg * drho) / (2*OMEGA*sinphi)
-        u = util.uintegrate(dudz, coll.asarray("depth"))
+        u = util.uintegrate(dudz, coll.asarray("z"))
 
         for (ic,cast) in enumerate(coll):
             cast._addkeydata(dudzkey, dudz[:,ic], overwrite=overwrite)
